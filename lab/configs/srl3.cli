@@ -1,0 +1,35 @@
+set / network-instance default interface ethernet-1/1.0
+set / network-instance default interface ethernet-1/2.0
+set / network-instance default interface lo0.0
+set / network-instance default interface system0.0
+set / network-instance default protocols bgp admin-state enable
+set / network-instance default protocols bgp autonomous-system 65000
+set / network-instance default protocols bgp router-id 10.0.0.3
+set / network-instance default protocols bgp afi-safi ipv4-unicast admin-state enable
+set / network-instance default protocols bgp group ibgp peer-as 65000
+set / network-instance default protocols bgp group ibgp export-policy [ EXPORT-CUSTOMER ]
+set / network-instance default protocols bgp group ibgp afi-safi ipv4-unicast admin-state enable
+set / network-instance default protocols bgp group ibgp transport local-address 10.0.0.3
+set / network-instance default protocols bgp neighbor 10.0.0.1 peer-group ibgp
+set / network-instance default protocols bgp neighbor 10.0.0.2 peer-group ibgp
+set / network-instance default protocols ospf instance main admin-state enable
+set / network-instance default protocols ospf instance main version ospf-v2
+set / network-instance default protocols ospf instance main router-id 10.0.0.3
+set / network-instance default protocols ospf instance main area 0.0.0.0 interface ethernet-1/1.0 interface-type point-to-point
+set / network-instance default protocols ospf instance main area 0.0.0.0 interface ethernet-1/2.0 interface-type point-to-point
+set / network-instance default protocols ospf instance main area 0.0.0.0 interface system0.0 passive true
+set / routing-policy prefix-set CUSTOMER prefix 192.168.3.0/24 mask-length-range exact
+set / routing-policy policy EXPORT-CUSTOMER statement 10 match prefix prefix-set CUSTOMER
+set / routing-policy policy EXPORT-CUSTOMER statement 10 action policy-result accept
+set / interface ethernet-1/1 admin-state enable
+set / interface ethernet-1/1 subinterface 0 ipv4 admin-state enable
+set / interface ethernet-1/1 subinterface 0 ipv4 address 10.1.23.1/31
+set / interface ethernet-1/2 admin-state enable
+set / interface ethernet-1/2 subinterface 0 ipv4 admin-state enable
+set / interface ethernet-1/2 subinterface 0 ipv4 address 10.1.13.1/31
+set / interface lo0 admin-state enable
+set / interface lo0 subinterface 0 ipv4 admin-state enable
+set / interface lo0 subinterface 0 ipv4 address 192.168.3.1/24
+set / interface system0 admin-state enable
+set / interface system0 subinterface 0 ipv4 admin-state enable
+set / interface system0 subinterface 0 ipv4 address 10.0.0.3/32
