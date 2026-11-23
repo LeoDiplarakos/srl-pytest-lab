@@ -1,0 +1,19 @@
+nodes:
+  srl1:
+    host: 172.20.20.2
+    loopback: 10.0.0.1
+    customer_prefix: 192.168.1.0/24
+    ospf_interfaces: [ethernet-1/1.0, ethernet-1/2.0]
+    bgp_peers: [10.0.0.2, 10.0.0.3]
+  srl2:
+    host: 172.20.20.3
+    loopback: 10.0.0.2
+    customer_prefix: 192.168.2.0/24
+    ospf_interfaces: [ethernet-1/1.0, ethernet-1/2.0]
+    bgp_peers: [10.0.0.1, 10.0.0.3]
+  srl3:
+    host: 172.20.20.4
+    loopback: 10.0.0.3
+    customer_prefix: 192.168.3.0/24
+    ospf_interfaces: [ethernet-1/1.0, ethernet-1/2.0]
+    bgp_peers: [10.0.0.1, 10.0.0.2]
