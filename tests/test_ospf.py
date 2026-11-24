@@ -12,5 +12,6 @@ def test_ospf_neighbor_full(clients, node, iface):
     for nbr in neighbors:
         state = nbr["adjacency-state"]
         assert state.endswith("full"), (
-            f"{node}: OSPF neighbor {nbr['router-id']} on {iface} is {state!r}, expected 'full'"
+            f"{node}: OSPF neighbor {nbr['router-id']} on {iface} is {state!r}, "
+            "expected 'full'"
         )

@@ -1,6 +1,13 @@
 import pytest
-from helpers import ospf_neighbor_count, route_next_hop_ips, wait_until, get_bgp_neighbor
-    
+
+from helpers import (
+    get_bgp_neighbor,
+    ospf_neighbor_count,
+    route_next_hop_ips,
+    wait_until,
+)
+
+
 @pytest.mark.disruptive
 def test_link_failure_reroutes(clients, break_link):
     """When srl1 ethernet-1/1 (link to srl2) goes down:
@@ -11,7 +18,6 @@ def test_link_failure_reroutes(clients, break_link):
     - 192.168.2.0/24 stays in srl1's route table (BGP, next-hop 10.0.0.2).
     """
     srl1 = clients["srl1"]
-
 
     assert wait_until(lambda: ospf_neighbor_count(srl1) == 1), (
         f"expected 1 OSPF neighbor on srl1, got {ospf_neighbor_count(srl1)}"

@@ -9,15 +9,16 @@ gNMI paths used in this project (add each new path here):
       /area[area-id=0.0.0.0]/interface[interface-name=<if>.0]
       /neighbor[router-id=<id>]/adjacency-state                  -> "...:full"
 """
-from pathlib import Path
-from typing import Any
-from pygnmi.client import gNMIException
 
-import yaml
 import ipaddress
 import re
 import subprocess
 import time
+from pathlib import Path
+from typing import Any
+
+import yaml
+from pygnmi.client import gNMIException
 
 INVENTORY_PATH = Path(__file__).parent / "inventory.yml"
 
@@ -44,6 +45,7 @@ def get_value(client: Any, path: str) -> Any:
         raise LookupError(f"no data returned for path {path}")
     return updates[0]["val"]
 
+
 OSPF_IFACE = (
     "/network-instance[name=default]/protocols/ospf/instance[name=main]"
     "/area[area-id=0.0.0.0]/interface[interface-name={iface}]"
@@ -67,7 +69,10 @@ def get_ospf_neighbors(client: Any, iface: str) -> list[dict]:
         return []
     return value.get("neighbor", [])
 
-BGP_NEIGHBOR = "/network-instance[name=default]/protocols/bgp/neighbor[peer-address={peer}]"
+
+BGP_NEIGHBOR = (
+    "/network-instance[name=default]/protocols/bgp/neighbor[peer-address={peer}]"
+)
 
 
 def get_bgp_neighbor(client: Any, peer: str) -> dict:
@@ -84,6 +89,7 @@ def ipv4_received_routes(neighbor: dict) -> int:
         if afi["afi-safi-name"].endswith("ipv4-unicast"):
             return afi.get("received-routes", 0)
     return 0
+
 
 ROUTE_TABLE = "/network-instance[name=default]/route-table/ipv4-unicast/route"
 
@@ -113,9 +119,14 @@ def route_params(kind: str) -> list[tuple[str, str, str]]:
         for other, data in nodes.items():
             if other == node:
                 continue
-            prefix = f"{data['loopback']}/32" if kind == "loopback" else data["customer_prefix"]
+            prefix = (
+                f"{data['loopback']}/32"
+                if kind == "loopback"
+                else data["customer_prefix"]
+            )
             params.append((node, other, prefix))
     return params
+
 
 PING_COUNT = 3
 
@@ -156,10 +167,12 @@ def reachability_params(kind: str) -> list[tuple[str, str, str, str]]:
         if other != node
     ]
 
+
 def set_admin_state(client, interface, state):
     """Set interface admin-state ('enable' or 'disable') via gNMI set."""
     path = f"/interface[name={interface}]/admin-state"
     client.set(update=[(path, f'"{state}"')])
+
 
 def wait_until(check, timeout=60, interval=2):
     """Call check() until it returns True or timeout expires.
@@ -177,12 +190,14 @@ def wait_until(check, timeout=60, interval=2):
         time.sleep(interval)
     return False
 
+
 OSPF_IFACES = ("ethernet-1/1.0", "ethernet-1/2.0")
 
 
 def ospf_neighbor_count(client):
     """Total OSPF neighbors on a node's two underlay interfaces."""
     return sum(len(get_ospf_neighbors(client, i)) for i in OSPF_IFACES)
+
 
 NH_BASE = "/network-instance[name=default]/route-table"
 

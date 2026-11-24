@@ -16,7 +16,8 @@ def test_loopback_learned_via_ospf(route_tables, node, other, prefix):
     assert route, f"{node}: no route to {other}'s loopback {prefix}"
     route_type = route["route-type"]
     assert "ospf" in route_type, (
-        f"{node}: route {prefix} ({other} loopback) learned via {route_type!r}, expected OSPF"
+        f"{node}: route {prefix} ({other} loopback) learned via {route_type!r}, "
+        "expected OSPF"
     )
 
 
@@ -26,6 +27,7 @@ def test_customer_prefix_learned_via_bgp(route_tables, node, other, prefix):
     assert route, f"{node}: no route to {other}'s customer prefix {prefix}"
     route_type = route["route-type"]
     assert route_type.endswith("bgp"), (
-        f"{node}: route {prefix} ({other} customer prefix) learned via {route_type!r}, expected BGP"
+        f"{node}: route {prefix} ({other} customer prefix) learned via "
+        "{route_type!r}, expected BGP"
     )
     assert route["active"], f"{node}: route {prefix} is present but not active"

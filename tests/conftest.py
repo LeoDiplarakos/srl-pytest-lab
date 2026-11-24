@@ -1,11 +1,19 @@
 """Shared fixtures: inventory and one gNMI client per router."""
+
 import os
 from contextlib import ExitStack
 
 import pytest
 from pygnmi.client import gNMIclient
 
-from helpers import get_routes, load_inventory, set_admin_state, ospf_neighbor_count, wait_until, get_bgp_neighbor
+from helpers import (
+    get_bgp_neighbor,
+    get_routes,
+    load_inventory,
+    ospf_neighbor_count,
+    set_admin_state,
+    wait_until,
+)
 
 USER = os.environ.get("SRL_USER", "admin")
 PASSWORD = os.environ.get("SRL_PASSWORD", "NokiaSrl1!")
@@ -35,10 +43,12 @@ def clients(inventory):
             for name, node in inventory["nodes"].items()
         }
 
+
 @pytest.fixture(scope="module")
 def route_tables(clients) -> dict:
     """Route table of every node, read once per test file."""
     return {name: get_routes(client) for name, client in clients.items()}
+
 
 @pytest.fixture
 def break_link(clients):
