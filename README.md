@@ -9,9 +9,10 @@ built with Containerlab, pytest and gNMI.
 
 The test suite reads live state from every router over gNMI and checks it against an
 expected-state inventory (`tests/inventory.yml`). It covers interfaces, OSPF adjacencies,
-iBGP sessions, route tables, and end-to-end ping between loopbacks and customer networks.
-A separate **disruptive** failover test shuts down a link, checks that traffic reroutes
-without the iBGP session flapping, and then restores the link.
+iBGP sessions and route tables. End-to-end ping between loopbacks and customer networks
+runs `ping` inside the router containers via `docker exec`. A separate **disruptive**
+failover test shuts down a link, checks that traffic reroutes without the iBGP session
+flapping, and then restores the link.
 
 ## Topology
 
@@ -45,8 +46,7 @@ Image: `ghcr.io/nokia/srlinux:26.7.2`. Topology file: `lab/srl-lab.clab.yml`,
 startup configs in `lab/configs/`.
 
 ## Quick start
-
-Requirements: Docker, [Containerlab](https://containerlab.dev), Python 3.12.
+ssssssssssssssssssssssssssssssssssssssssssssssssssa
 
 ```bash
 pip install -r requirements.txt
@@ -101,8 +101,18 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on 
   level before any test runs.
 - **Disruptive tests are kept separate.** They are marked `@pytest.mark.disruptive`
   and excluded by default in `pytest.ini`, so `pytest` is always safe to run against
-  a live network. The `break_link` fixture restores the link in a `finally` block
-  and waits for OSPF to recover, so a failing test can't leave the lab broken.
+  a live network. The `break_link` fixture restores the link in a `finally` block and
+  waits for OSPF to recover, so a failing test leaves the lab healthy (a killed process
+  would not; re-enable the interface or run `make destroy && make deploy`).
 - **Expected state as data.** The inventory YAML describes what the network *should*
-  look like; tests compare it with what gNMI reports. Adding a router means editing
-  YAML, not test code.
+  look like; the parametrized tests compare it with what gNMI reports, so extending
+  those checks to another router means editing YAML. (The lab topology, the startup
+  config and the failover test are still router-specific.)
+
+## Limitations
+
+- The failover test covers a single link (srl1 ↔ srl2) and checks the result from srl1 only.
+- Configuration is a static startup-config; there are no config-push tests.
+- IPv4 only. Tested only on SR Linux 26.7.2.
+- Management IPs in `tests/inventory.yml` (`172.20.20.2–4`) assume Containerlab's default
+  address allocation; they are not pinned in the topology file.
