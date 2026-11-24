@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+import ipaddress
+import re
+import subprocess
 
 INVENTORY_PATH = Path(__file__).parent / "inventory.yml"
 
@@ -111,3 +114,42 @@ def route_params(kind: str) -> list[tuple[str, str, str]]:
             prefix = f"{data['loopback']}/32" if kind == "loopback" else data["customer_prefix"]
             params.append((node, other, prefix))
     return params
+
+PING_COUNT = 3
+
+
+def ping(node: str, dest: str, source: str, count: int = PING_COUNT) -> int:
+    """Ping from a router's default network-instance; return the replies received."""
+    command = f"ping {dest} network-instance default -c {count} -I {source}"
+    result = subprocess.run(
+        ["docker", "exec", f"clab-srl-lab-{node}", "sr_cli", command],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    match = re.search(r"(\d+) packets transmitted, (\d+) received", result.stdout)
+    if not match:
+        raise RuntimeError(
+            f"{node}: could not parse ping output: {result.stdout or result.stderr}"
+        )
+    return int(match.group(2))
+
+
+def reachability_params(kind: str) -> list[tuple[str, str, str, str]]:
+    """(node, other, source, dest) for every router pair.
+
+    kind is 'loopback' (use the /32) or 'customer' (first host of the customer prefix).
+    """
+    nodes = load_inventory()["nodes"]
+
+    def address(data: dict) -> str:
+        if kind == "loopback":
+            return data["loopback"]
+        return str(next(ipaddress.ip_network(data["customer_prefix"]).hosts()))
+
+    return [
+        (node, other, address(data), address(other_data))
+        for node, data in nodes.items()
+        for other, other_data in nodes.items()
+        if other != node
+    ]
