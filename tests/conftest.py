@@ -5,7 +5,7 @@ from contextlib import ExitStack
 import pytest
 from pygnmi.client import gNMIclient
 
-from helpers import load_inventory
+from helpers import get_routes, load_inventory
 
 USER = os.environ.get("SRL_USER", "admin")
 PASSWORD = os.environ.get("SRL_PASSWORD", "NokiaSrl1!")
@@ -34,3 +34,8 @@ def clients(inventory):
             )
             for name, node in inventory["nodes"].items()
         }
+
+@pytest.fixture(scope="module")
+def route_tables(clients) -> dict:
+    """Route table of every node, read once per test file."""
+    return {name: get_routes(client) for name, client in clients.items()}

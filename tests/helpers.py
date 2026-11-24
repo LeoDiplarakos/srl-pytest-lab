@@ -79,3 +79,35 @@ def ipv4_received_routes(neighbor: dict) -> int:
         if afi["afi-safi-name"].endswith("ipv4-unicast"):
             return afi.get("received-routes", 0)
     return 0
+
+ROUTE_TABLE = "/network-instance[name=default]/route-table/ipv4-unicast/route"
+
+
+def get_routes(client: Any) -> dict[str, dict]:
+    """All IPv4 routes of the default network-instance, keyed by prefix."""
+    try:
+        value = get_value(client, ROUTE_TABLE)
+    except LookupError:
+        return {}
+    routes: dict[str, dict] = {}
+    for route in value.get("route", []):
+        prefix = route["ipv4-prefix"]
+        if prefix not in routes or route.get("active"):
+            routes[prefix] = route
+    return routes
+
+
+def route_params(kind: str) -> list[tuple[str, str, str]]:
+    """(node, other_node, prefix) for every router and every *other* router.
+
+    kind is 'loopback' (the /32) or 'customer_prefix'.
+    """
+    nodes = load_inventory()["nodes"]
+    params = []
+    for node in nodes:
+        for other, data in nodes.items():
+            if other == node:
+                continue
+            prefix = f"{data['loopback']}/32" if kind == "loopback" else data["customer_prefix"]
+            params.append((node, other, prefix))
+    return params
