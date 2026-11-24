@@ -94,7 +94,6 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on 
    `junit-reports` artifact, and the lab is always destroyed, even if a step fails.
 
 ## Lessons / design notes
-σσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσ
 - **iBGP between loopbacks, not link addresses.** Sessions are sourced from `system0`
   and the loopbacks are carried by OSPF. When a link fails, OSPF finds the path through
   the third router and the BGP session survives. The failover test checks this by
