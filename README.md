@@ -46,7 +46,10 @@ Image: `ghcr.io/nokia/srlinux:26.7.2`. Topology file: `lab/srl-lab.clab.yml`,
 startup configs in `lab/configs/`.
 
 ## Quick start
-ssssssssssssssssssssssssssssssssssssssssssssssssssa
+
+Requirements: Docker, [Containerlab](https://containerlab.dev), Python 3.12, and `sudo`
+rights (Containerlab needs them to deploy and destroy the lab). The tests must run on the
+same host as Docker, because the ping tests use `docker exec`.
 
 ```bash
 pip install -r requirements.txt
@@ -66,7 +69,7 @@ gNMI credentials can be overridden with `SRL_USER`, `SRL_PASSWORD` and `SRL_GNMI
 
 | File                         | What it checks                                                                     |
 |------------------------------|------------------------------------------------------------------------------------|
-| `tests/test_smoke.py`        | Each router answers gNMI and runs SR Linux v26.x                                   |
+| `tests/test_smoke.py`        | Each router answers gNMI, runs SR Linux v26.x, and its host-name matches the inventory|
 | `tests/test_interfaces.py`   | Every link interface is oper-state `up`                                            |
 | `tests/test_ospf.py`         | Every OSPF interface has a neighbor in state `full`                                |
 | `tests/test_bgp.py`          | Every iBGP session is `established` and each peer sends at least one IPv4 prefix   |
@@ -74,10 +77,11 @@ gNMI credentials can be overridden with `SRL_USER`, `SRL_PASSWORD` and `SRL_GNMI
 | `tests/test_reachability.py` | Ping between all loopbacks and all customer networks (every router pair)           |
 | `tests/test_failover.py`     | *Disruptive:* shut srl1↔srl2 link → OSPF drops to 1 neighbor, srl2 loopback reroutes via srl3, BGP route stays, iBGP session does not flap |
 
-Tests are parametrized from `tests/inventory.yml`, so each failure names the exact
-node/peer/interface (e.g. `test_bgp_session_established[srl1-10.0.0.2]`).
-Shared gNMI helpers live in `tests/helpers.py`; `tools/probe.py` prints the raw gNMI
-response for any path, which is handy when adding a new test.
+Most tests are parametrized from `tests/inventory.yml`, so a failure names the exact
+node, peer or interface (e.g. `test_bgp_session_established[srl1-10.0.0.2]`). The smoke
+tests use a fixed node list. Shared gNMI helpers live in `tests/helpers.py`;
+`tools/probe.py` prints the raw gNMI response for any path, which is handy when adding a
+new test.
 
 ## CI
 
@@ -90,7 +94,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on 
    `junit-reports` artifact, and the lab is always destroyed, even if a step fails.
 
 ## Lessons / design notes
-
+σσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσσ
 - **iBGP between loopbacks, not link addresses.** Sessions are sourced from `system0`
   and the loopbacks are carried by OSPF. When a link fails, OSPF finds the path through
   the third router and the BGP session survives. The failover test checks this by
@@ -100,19 +104,24 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on 
   time. This makes them both faster and less flaky. `make wait` does the same at lab
   level before any test runs.
 - **Disruptive tests are kept separate.** They are marked `@pytest.mark.disruptive`
-  and excluded by default in `pytest.ini`, so `pytest` is always safe to run against
-  a live network. The `break_link` fixture restores the link in a `finally` block and
-  waits for OSPF to recover, so a failing test leaves the lab healthy (a killed process
-  would not; re-enable the interface or run `make destroy && make deploy`).
+  and excluded by default in `pytest.ini`, so plain `pytest` never breaks anything. The
+  `break_link` fixture restores the link in a `finally` block and waits for OSPF to
+  recover, so a failing test leaves the lab healthy. A killed process would not: in that
+  case re-enable the interface or run `make destroy && make deploy`.
 - **Expected state as data.** The inventory YAML describes what the network *should*
   look like; the parametrized tests compare it with what gNMI reports, so extending
-  those checks to another router means editing YAML. (The lab topology, the startup
-  config and the failover test are still router-specific.)
+  those checks to another router means editing YAML. The lab topology, the startup
+  configs and the failover test are still router-specific.
+- **Pinned management IPs.** The inventory finds routers by management IP, and Docker
+  assigns IPs in container start order, which can change between runs. Early CI runs
+  failed because of this. The topology now pins `mgmt-ipv4`, and a smoke test checks
+  that each router's host-name matches its inventory name, so a mix-up fails with a
+  clear message.
 
 ## Limitations
 
-- The failover test covers a single link (srl1 ↔ srl2) and checks the result from srl1 only.
-- Configuration is a static startup-config; there are no config-push tests.
-- IPv4 only. Tested only on SR Linux 26.7.2.
-- Management IPs in `tests/inventory.yml` (`172.20.20.2–4`) assume Containerlab's default
-  address allocation; they are not pinned in the topology file.
+- The failover test covers one scenario: srl1's link to srl2 going down.
+- The lab configuration is applied once as startup-config; there are no tests that push
+  or roll back configuration.
+- Tested with SR Linux 26.7.2 and Containerlab 0.83.0 only.
+- Convergence is checked by polling with timeouts, not by measuring convergence time.
