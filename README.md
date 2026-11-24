@@ -1,1 +1,108 @@
 # srl-pytest-lab
+
+Automated tests for a 3-router Nokia SR Linux network (OSPF underlay + iBGP overlay),
+built with Containerlab, pytest and gNMI.
+
+[![CI](https://github.com/LeoDiplarakos/srl-pytest-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/LeoDiplarakos/srl-pytest-lab/actions/workflows/ci.yml)
+
+## What it does
+
+The test suite reads live state from every router over gNMI and checks it against an
+expected-state inventory (`tests/inventory.yml`). It covers interfaces, OSPF adjacencies,
+iBGP sessions, route tables, and end-to-end ping between loopbacks and customer networks.
+A separate **disruptive** failover test shuts down a link, checks that traffic reroutes
+without the iBGP session flapping, and then restores the link.
+
+## Topology
+
+```
+                    AS 65000 (iBGP full mesh between loopbacks)
+
+                 ┌──────────────────────┐
+                 │         srl1         │
+                 │  system0 10.0.0.1/32 │
+                 │  lo0  192.168.1.1/24 │
+                 └──────────────────────┘
+          e1-1 10.1.12.0/31        e1-2 10.1.13.0/31
+                 /                          \
+                /                            \
+   e1-1 10.1.12.1/31                     e1-2 10.1.13.1/31
+ ┌──────────────────────┐            ┌──────────────────────┐
+ │         srl2         │            │         srl3         │
+ │  system0 10.0.0.2/32 │────────────│  system0 10.0.0.3/32 │
+ │  lo0  192.168.2.1/24 │            │  lo0  192.168.3.1/24 │
+ └──────────────────────┘            └──────────────────────┘
+      e1-2 10.1.23.0/31                 e1-1 10.1.23.1/31
+```
+
+| Layer    | What runs there                                                              |
+|----------|------------------------------------------------------------------------------|
+| Underlay | OSPFv2 area 0, point-to-point /31 links, `system0` loopbacks advertised (passive) |
+| Overlay  | iBGP AS 65000, full mesh, sessions sourced from `system0` loopbacks          |
+| Customer | Each router exports its `192.168.X.0/24` (`lo0`) into BGP via policy `EXPORT-CUSTOMER` |
+
+Image: `ghcr.io/nokia/srlinux:26.7.2`. Topology file: `lab/srl-lab.clab.yml`,
+startup configs in `lab/configs/`.
+
+## Quick start
+
+Requirements: Docker, [Containerlab](https://containerlab.dev), Python 3.12.
+
+```bash
+pip install -r requirements.txt
+
+make deploy            # start the 3-router lab with Containerlab
+make wait              # poll until OSPF + BGP have converged
+make test              # run all safe (read-only) tests
+make test-disruptive   # run the link-failover test
+make destroy           # tear the lab down
+```
+
+Other targets: `make lint`, `make format` (ruff), `make test-all` (safe + disruptive).
+
+gNMI credentials can be overridden with `SRL_USER`, `SRL_PASSWORD` and `SRL_GNMI_PORT`.
+
+## Tests
+
+| File                         | What it checks                                                                     |
+|------------------------------|------------------------------------------------------------------------------------|
+| `tests/test_smoke.py`        | Each router answers gNMI and runs SR Linux v26.x                                   |
+| `tests/test_interfaces.py`   | Every link interface is oper-state `up`                                            |
+| `tests/test_ospf.py`         | Every OSPF interface has a neighbor in state `full`                                |
+| `tests/test_bgp.py`          | Every iBGP session is `established` and each peer sends at least one IPv4 prefix   |
+| `tests/test_routes.py`       | Remote loopbacks are learned via OSPF; remote customer prefixes via BGP and active |
+| `tests/test_reachability.py` | Ping between all loopbacks and all customer networks (every router pair)           |
+| `tests/test_failover.py`     | *Disruptive:* shut srl1↔srl2 link → OSPF drops to 1 neighbor, srl2 loopback reroutes via srl3, BGP route stays, iBGP session does not flap |
+
+Tests are parametrized from `tests/inventory.yml`, so each failure names the exact
+node/peer/interface (e.g. `test_bgp_session_established[srl1-10.0.0.2]`).
+Shared gNMI helpers live in `tests/helpers.py`; `tools/probe.py` prints the raw gNMI
+response for any path, which is handy when adding a new test.
+
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests:
+
+1. **lint** – `ruff check` and `ruff format --check`.
+2. **test** – installs Containerlab on the runner, deploys the lab, runs `make wait`,
+   then the safe tests and the disruptive tests as separate steps.
+3. JUnit XML reports (`report-safe.xml`, `report-disruptive.xml`) are uploaded as the
+   `junit-reports` artifact, and the lab is always destroyed, even if a step fails.
+
+## Lessons / design notes
+
+- **iBGP between loopbacks, not link addresses.** Sessions are sourced from `system0`
+  and the loopbacks are carried by OSPF. When a link fails, OSPF finds the path through
+  the third router and the BGP session survives. The failover test checks this by
+  asserting that `established-transitions` did not change.
+- **`wait_until` instead of `sleep`.** Convergence time varies (especially on CI
+  runners), so tests poll a condition until a timeout instead of sleeping for a fixed
+  time. This makes them both faster and less flaky. `make wait` does the same at lab
+  level before any test runs.
+- **Disruptive tests are kept separate.** They are marked `@pytest.mark.disruptive`
+  and excluded by default in `pytest.ini`, so `pytest` is always safe to run against
+  a live network. The `break_link` fixture restores the link in a `finally` block
+  and waits for OSPF to recover, so a failing test can't leave the lab broken.
+- **Expected state as data.** The inventory YAML describes what the network *should*
+  look like; tests compare it with what gNMI reports. Adding a router means editing
+  YAML, not test code.
