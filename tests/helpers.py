@@ -11,11 +11,13 @@ gNMI paths used in this project (add each new path here):
 """
 from pathlib import Path
 from typing import Any
+from pygnmi.client import gNMIException
 
 import yaml
 import ipaddress
 import re
 import subprocess
+import time
 
 INVENTORY_PATH = Path(__file__).parent / "inventory.yml"
 
@@ -153,3 +155,46 @@ def reachability_params(kind: str) -> list[tuple[str, str, str, str]]:
         for other, other_data in nodes.items()
         if other != node
     ]
+
+def set_admin_state(client, interface, state):
+    """Set interface admin-state ('enable' or 'disable') via gNMI set."""
+    path = f"/interface[name={interface}]/admin-state"
+    client.set(update=[(path, f'"{state}"')])
+
+def wait_until(check, timeout=60, interval=2):
+    """Call check() until it returns True or timeout expires.
+
+    Returns True if the condition was met, False on timeout.
+    Exceptions raised by check() count as 'not yet'.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if check():
+                return True
+        except (LookupError, KeyError, gNMIException):
+            pass
+        time.sleep(interval)
+    return False
+
+OSPF_IFACES = ("ethernet-1/1.0", "ethernet-1/2.0")
+
+
+def ospf_neighbor_count(client):
+    """Total OSPF neighbors on a node's two underlay interfaces."""
+    return sum(len(get_ospf_neighbors(client, i)) for i in OSPF_IFACES)
+
+NH_BASE = "/network-instance[name=default]/route-table"
+
+
+def route_next_hop_ips(client, prefix):
+    """Resolve a route's next-hop-group into a list of next-hop IPs."""
+    route = get_routes(client)[prefix]
+    group = get_value(
+        client, f"{NH_BASE}/next-hop-group[index={route['next-hop-group']}]"
+    )
+    ips = []
+    for member in group["next-hop"]:
+        nh = get_value(client, f"{NH_BASE}/next-hop[index={member['next-hop']}]")
+        ips.append(nh.get("ip-address"))
+    return ips

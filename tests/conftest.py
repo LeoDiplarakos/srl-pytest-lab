@@ -5,7 +5,7 @@ from contextlib import ExitStack
 import pytest
 from pygnmi.client import gNMIclient
 
-from helpers import get_routes, load_inventory
+from helpers import get_routes, load_inventory, set_admin_state, ospf_neighbor_count, wait_until, get_bgp_neighbor
 
 USER = os.environ.get("SRL_USER", "admin")
 PASSWORD = os.environ.get("SRL_PASSWORD", "NokiaSrl1!")
@@ -39,3 +39,20 @@ def clients(inventory):
 def route_tables(clients) -> dict:
     """Route table of every node, read once per test file."""
     return {name: get_routes(client) for name, client in clients.items()}
+
+@pytest.fixture
+def break_link(clients):
+    """Disable srl1 ethernet-1/1 for the test, always re-enable it after.
+
+    Yields the iBGP established-transitions counter taken before the break.
+    """
+    before = get_bgp_neighbor(clients["srl1"], "10.0.0.2")["established-transitions"]
+    set_admin_state(clients["srl1"], "ethernet-1/1", "disable")
+    try:
+        yield {"bgp_transitions": before}
+    finally:
+        set_admin_state(clients["srl1"], "ethernet-1/1", "enable")
+        converged = wait_until(
+            lambda: ospf_neighbor_count(clients["srl1"]) == 2, timeout=90
+        )
+        assert converged, "OSPF did not recover after link restore"
