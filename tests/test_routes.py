@@ -28,6 +28,6 @@ def test_customer_prefix_learned_via_bgp(route_tables, node, other, prefix):
     route_type = route["route-type"]
     assert route_type.endswith("bgp"), (
         f"{node}: route {prefix} ({other} customer prefix) learned via "
-        "{route_type!r}, expected BGP"
+        f"{route_type!r}, expected BGP"
     )
     assert route["active"], f"{node}: route {prefix} is present but not active"
