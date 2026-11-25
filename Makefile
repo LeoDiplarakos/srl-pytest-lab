@@ -7,7 +7,8 @@ deploy:
 
 wait:
 	for i in $$(seq 1 40); do \
-		pytest tests/test_ospf.py tests/test_bgp.py -q && exit 0; \
+		echo "convergence check $$i/40"; \
+		pytest tests/test_ospf.py tests/test_bgp.py -q --tb=no && exit 0; \
 		sleep 10; \
 	done; exit 1
 
