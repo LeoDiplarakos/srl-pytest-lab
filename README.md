@@ -1,9 +1,22 @@
 # srl-pytest-lab
 
-Automated tests for a 3-router Nokia SR Linux network (OSPF underlay + iBGP overlay),
-built with Containerlab, pytest and gNMI.
+I built this lab to learn how network automation and testing work in practice: a small
+Nokia SR Linux network that I deploy as code, test automatically over gNMI, and break on
+purpose to see how it recovers.
 
 [![CI](https://github.com/LeoDiplarakos/srl-pytest-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/LeoDiplarakos/srl-pytest-lab/actions/workflows/ci.yml)
+
+## Why I built it
+
+My diploma thesis was about an orchestrator that provisions L3VPN transport slices through
+an SDN controller. There, the controller configured the network for me. I wanted to go one
+layer lower: configure the routing protocols myself, and prove with tests that the network
+behaves the way I expect. My goals were to:
+
+- run a real router OS locally, with Containerlab and Nokia SR Linux;
+- describe the expected state of the network as data and check it automatically;
+- break a link on purpose, check that traffic reroutes, and measure how long it takes;
+- run everything in CI, so a fresh machine can reproduce it.
 
 ## What it does
 
@@ -36,14 +49,37 @@ flapping, and then restores the link.
       e1-2 10.1.23.0/31                 e1-1 10.1.23.1/31
 ```
 
-| Layer    | What runs there                                                              |
-|----------|------------------------------------------------------------------------------|
-| Underlay | OSPFv2 area 0, point-to-point /31 links, `system0` loopbacks advertised (passive) |
-| Overlay  | iBGP AS 65000, full mesh, sessions sourced from `system0` loopbacks          |
+| Layer    | What runs there                                                                        |
+|----------|----------------------------------------------------------------------------------------|
+| Underlay | OSPFv2 area 0, point-to-point /31 links, `system0` loopbacks advertised (passive)      |
+| Overlay  | iBGP AS 65000, full mesh, sessions sourced from `system0` loopbacks                    |
 | Customer | Each router exports its `192.168.X.0/24` (`lo0`) into BGP via policy `EXPORT-CUSTOMER` |
 
-Image: `ghcr.io/nokia/srlinux:26.7.2`. Topology file: `lab/srl-lab.clab.yml`,
-startup configs in `lab/configs/`.
+I chose a triangle on purpose: every router has a direct link and a detour through the
+third router, so a single link failure is survivable and testable.
+
+Image: `ghcr.io/nokia/srlinux:26.7.2`. Topology file: `lab/srl-lab.clab.yml`, startup
+configs in `lab/configs/`.
+
+## What I measured
+
+To see the failover from the traffic's point of view, I ran a ping every 100 ms from
+srl1's loopback to srl2's loopback while shutting the srl1–srl2 link, three times:
+
+| Run | Packets lost when the link went down | Outage  | Packets lost when it came back |
+|-----|--------------------------------------|---------|--------------------------------|
+| 1   | 11                                   | ~1.1 s  | not captured                   |
+| 2   | 10                                   | ~1.0 s  | not captured                   |
+| 3   | 9                                    | ~0.9 s  | 0                              |
+
+The TTL of the replies dropped from 64 to 63 after the failure: traffic was now taking the
+extra hop through srl3. Recovery lost nothing, because OSPF brings the direct adjacency
+back to full before moving the route, so the detour keeps working until the direct path is
+ready.
+
+About one second is close to a best case: an administrative shutdown is detected
+instantly. A real fibre cut that doesn't drop the link would depend on the OSPF dead
+interval, unless BFD is used.
 
 ## Quick start
 
@@ -67,55 +103,78 @@ gNMI credentials can be overridden with `SRL_USER`, `SRL_PASSWORD` and `SRL_GNMI
 
 ## Tests
 
-| File                         | What it checks                                                                     |
-|------------------------------|------------------------------------------------------------------------------------|
-| `tests/test_smoke.py`        | Each router answers gNMI, runs SR Linux v26.x, and its host-name matches the inventory|
-| `tests/test_interfaces.py`   | Every link interface is oper-state `up`                                            |
-| `tests/test_ospf.py`         | Every OSPF interface has a neighbor in state `full`                                |
-| `tests/test_bgp.py`          | Every iBGP session is `established` and each peer sends at least one IPv4 prefix   |
-| `tests/test_routes.py`       | Remote loopbacks are learned via OSPF; remote customer prefixes via BGP and active |
-| `tests/test_reachability.py` | Ping between all loopbacks and all customer networks (every router pair)           |
+The test files follow the layers of the network, so when something breaks, the first
+layer that fails points to the cause.
+
+| File                         | What it checks                                                                         |
+|------------------------------|----------------------------------------------------------------------------------------|
+| `tests/test_smoke.py`        | Each router answers gNMI, runs SR Linux v26.x, and its host-name matches the inventory |
+| `tests/test_interfaces.py`   | Every link interface is oper-state `up`                                                |
+| `tests/test_ospf.py`         | Every OSPF interface has a neighbor in state `full`                                    |
+| `tests/test_bgp.py`          | Every iBGP session is `established` and each peer sends at least one IPv4 prefix       |
+| `tests/test_routes.py`       | Remote loopbacks are learned via OSPF; remote customer prefixes via BGP and active     |
+| `tests/test_reachability.py` | Ping between all loopbacks and all customer networks (every router pair)               |
 | `tests/test_failover.py`     | *Disruptive:* shut srl1↔srl2 link → OSPF drops to 1 neighbor, srl2 loopback reroutes via srl3, BGP route stays, iBGP session does not flap |
 
-Most tests are parametrized from `tests/inventory.yml`, so a failure names the exact
-node, peer or interface (e.g. `test_bgp_session_established[srl1-10.0.0.2]`). The smoke
-tests use a fixed node list. Shared gNMI helpers live in `tests/helpers.py`;
-`tools/probe.py` prints the raw gNMI response for any path, which is handy when adding a
-new test.
+Most tests are parametrized from `tests/inventory.yml`, so a failure names the exact node,
+peer or interface (e.g. `test_bgp_session_established[srl1-10.0.0.2]`). The smoke tests
+use a fixed node list. Shared gNMI helpers live in `tests/helpers.py`; `tools/probe.py`
+prints the raw gNMI response for any path, which is how I found the paths for each test.
+
+To make sure the tests actually catch problems, I broke the network on purpose (disabled a
+BGP neighbor, removed an export policy, shut an interface), predicted which tests should
+fail, and checked that exactly those failed.
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests:
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull
+requests:
 
-1. **lint** – `ruff check` and `ruff format --check`.
-2. **test** – installs Containerlab on the runner, deploys the lab, runs `make wait`,
-   then the safe tests and the disruptive tests as separate steps.
-3. JUnit XML reports (`report-safe.xml`, `report-disruptive.xml`) are uploaded as the
-   `junit-reports` artifact, and the lab is always destroyed, even if a step fails.
+1. **lint**: `ruff check` and `ruff format --check`.
+2. **test**: installs Containerlab on the runner, deploys the lab, runs `make wait`, then
+   the safe tests and the disruptive tests as separate steps.
+3. JUnit XML reports are uploaded as an artifact, and the lab is always destroyed, even if
+   a step fails.
 
-## Lessons / design notes
-- **iBGP between loopbacks, not link addresses.** Sessions are sourced from `system0`
-  and the loopbacks are carried by OSPF. When a link fails, OSPF finds the path through
-  the third router and the BGP session survives. The failover test checks this by
-  asserting that `established-transitions` did not change.
-- **`wait_until` instead of `sleep`.** Convergence time varies (especially on CI
-  runners), so tests poll a condition until a timeout instead of sleeping for a fixed
-  time. This makes them both faster and less flaky. `make wait` does the same at lab
-  level before any test runs.
-- **Disruptive tests are kept separate.** They are marked `@pytest.mark.disruptive`
-  and excluded by default in `pytest.ini`, so plain `pytest` never breaks anything. The
-  `break_link` fixture restores the link in a `finally` block and waits for OSPF to
-  recover, so a failing test leaves the lab healthy. A killed process would not: in that
-  case re-enable the interface or run `make destroy && make deploy`.
-- **Expected state as data.** The inventory YAML describes what the network *should*
-  look like; the parametrized tests compare it with what gNMI reports, so extending
-  those checks to another router means editing YAML. The lab topology, the startup
-  configs and the failover test are still router-specific.
-- **Pinned management IPs.** The inventory finds routers by management IP, and Docker
-  assigns IPs in container start order, which can change between runs. Early CI runs
-  failed because of this. The topology now pins `mgmt-ipv4`, and a smoke test checks
-  that each router's host-name matches its inventory name, so a mix-up fails with a
-  clear message.
+## Problems I ran into
+
+Most of what I learned came from things that went wrong:
+
+- **A routing policy without a `match` statement.** It was committed with a syntax error
+  in the match line, so the policy matched everything. I now run `diff` before every
+  `commit`.
+- **Customer prefixes in OSPF.** OSPF (preference 10) beat iBGP (170), so the BGP routes
+  stayed inactive. Each protocol now carries one kind of route: OSPF the infrastructure,
+  BGP the customer prefixes.
+- **A router configured as its own BGP neighbor.** I found it by diffing the three config
+  files against each other.
+- **A wait helper that hid a bug.** My first `wait_until` caught every exception, so a
+  `NameError` in my own code looked like a 60-second network timeout. It now catches only
+  the errors that mean "not ready yet".
+- **A typo that disabled a safety net.** `-m "not distruptive"` matched no tests, so the
+  failover test still ran in the default suite. I noticed because the output didn't say
+  `1 deselected`.
+- **Tests that started too early in CI.** The first CI run failed because BGP hadn't
+  converged yet. `make wait` now polls until OSPF is full and BGP is established.
+- **A flaky CI run.** It passed, then failed on a re-run with the same code. The deploy
+  log showed that Docker had assigned the management IPs in a different order, so the
+  test for srl1 was talking to srl3. The topology now pins `mgmt-ipv4`, and a smoke test
+  checks each router's host-name against the inventory.
+
+## Design notes
+
+- **iBGP between loopbacks, not link addresses.** When a link fails, OSPF finds the path
+  through the third router and the BGP session survives. The failover test checks this by
+  asserting that the `established-transitions` counter did not change.
+- **Polling instead of `sleep`.** Convergence time varies, especially on CI runners, so
+  tests wait for a condition with a timeout instead of sleeping for a fixed time.
+- **Disruptive tests are kept separate.** They are excluded by default in `pytest.ini`, so
+  plain `pytest` never breaks anything. The `break_link` fixture restores the link in a
+  `finally` block and waits for OSPF to recover. A killed process would not restore it: in
+  that case re-enable the interface or run `make destroy && make deploy`.
+- **Expected state as data.** The inventory describes what the network *should* look
+  like; the parametrized tests compare it with what gNMI reports. The lab topology, the
+  startup configs and the failover test are still router-specific.
 
 ## Limitations
 
@@ -123,4 +182,12 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on 
 - The lab configuration is applied once as startup-config; there are no tests that push
   or roll back configuration.
 - Tested with SR Linux 26.7.2 and Containerlab 0.83.0 only.
-- Convergence is checked by polling with timeouts, not by measuring convergence time.
+- The outage was measured by hand with ping; the failover test itself checks convergence
+  but does not time it.
+
+## What I'd like to add next
+
+- Measure the outage automatically inside the failover test.
+- Enable BFD and compare failure detection with and without it.
+- Replace polling with gNMI Subscribe (streaming telemetry).
+- Add tests that push a configuration change, verify it and roll it back.
